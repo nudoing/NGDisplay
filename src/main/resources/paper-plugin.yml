@@ -1,0 +1,8 @@
+name: NGDisplay
+version: '1.0'
+main: com.gmail.nudoing.nGDisplay.NGDisplay
+api-version: '1.21'
+authors: [ nudon ]
+description: test
+#depend: [ ProtocolLib ]
+
