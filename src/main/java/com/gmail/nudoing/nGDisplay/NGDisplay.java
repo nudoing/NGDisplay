@@ -1,19 +1,20 @@
 package com.gmail.nudoing.nGDisplay;
 
 
-import com.mojang.brigadier.Command;
-import com.mojang.brigadier.tree.LiteralCommandNode;
-import io.papermc.paper.command.brigadier.CommandSourceStack;
-import io.papermc.paper.command.brigadier.Commands;
-import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import net.kyori.adventure.key.Key;
+import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import net.kyori.adventure.title.Title;
 import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntitySpawnEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.joml.Matrix4f;
 
@@ -23,9 +24,9 @@ import java.util.UUID;
 public final class NGDisplay extends JavaPlugin implements Listener {
 
 
-    HashMap<UUID, TextDisplay> textDisplays = new HashMap<>();
+    private final HashMap<UUID, TextDisplay> textDisplays = new HashMap<>();
 
-    HashMap<UUID, Component> tempTexts = new HashMap<>();
+    private final HashMap<UUID, Component> keepDisplayTexts = new HashMap<>();
 
 
     @Override
@@ -33,113 +34,193 @@ public final class NGDisplay extends JavaPlugin implements Listener {
         // Plugin startup logic
         getServer().getPluginManager().registerEvents(this,this);
 
-//        ProtocolManager protocolManager = ProtocolLibrary.getProtocolManager();
-//        if (protocolManager == null) {
-//            getLogger().severe("ProtocolManager is not available. Please ensure ProtocolLib is installed.");
-//            return;
-//        }
-
-        this.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, commands -> {
-            // register your commands here ...
-            LiteralCommandNode<CommandSourceStack> buildCommand = Commands.literal("ng_reset")
-                    .executes(commandContext -> {
-                        textDisplays.forEach((uuid, textDisplay) -> textDisplay.remove());
-                        textDisplays.clear();
-                        tempTexts.clear();
-
-                        getServer().getOnlinePlayers().forEach(this::setupNGDisplay);
-                        return Command.SINGLE_SUCCESS;
-            }).build();
-            commands.registrar().register(buildCommand);
-        });
-
-
-
     }
 
     @Override
     public void onDisable() {
         // Plugin shutdown logic
+        clearAll();
+    }
+
+
+    void clearAll(){
+        textDisplays.values().forEach(Entity::remove);
+        textDisplays.clear();
+        keepDisplayTexts.clear();
     }
 
 
 
-    @EventHandler
-    public void onEntitySpawn(EntitySpawnEvent event){
-
-
-
-    }
-
-
-    void setupNGDisplay(Player player) {
+    /**
+     * NGDisplay を 召喚します
+     * @param player プレイヤー
+     */
+    void summonNGDisplay(Player player) {
         TextDisplay display = player.getWorld().spawn(player.getLocation(), TextDisplay.class, entity -> {
-            Component textComponent = tempTexts.getOrDefault(
+            Component textComponent = keepDisplayTexts.getOrDefault(
                     player.getUniqueId(),
-                    Component.text("こいつには見えてない\n↓")
+                    Component.text("NGワード")
             );
             entity.text(textComponent);
             entity.setBillboard(Display.Billboard.CENTER);
             entity.setTransformationMatrix(
                     new Matrix4f().translate(0,0.3f,0)
             );
-            entity.setVisibleByDefault(false);
-            entity.setPersistent(true);
+            entity.setVisibleByDefault(true);
+            entity.setPersistent(false);
+
+            entity.addScoreboardTag("NG");
+            entity.addScoreboardTag(player.getName());
+            player.hideEntity(this,entity);
+            player.addPassenger(entity);
+
         });
 
-        player.addPassenger(display);
         textDisplays.put(player.getUniqueId(), display);
 
-        display.addScoreboardTag("NG");
-        display.addScoreboardTag(player.getName());
-
-        getServer().getOnlinePlayers().stream().filter(p -> !p.equals(player))
-                .forEach(p -> p.showEntity(this,display));
-
-        textDisplays.forEach((uuid, textDisplay) -> {
-            if (!uuid.equals(player.getUniqueId())) {
-                player.showEntity(this, textDisplay);
-            }
-        });
 
     }
 
-    @EventHandler
-    public void onPlayerJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        setupNGDisplay(player);
-
+    /**
+     * NGDisplay を 初期化して表示します
+     * @param player 対象のプレイヤー
+     */
+    void createNGDisplay(Player player){
+        removeDisplayPermanently(player);
+        summonNGDisplay(player);
     }
 
 
-    @EventHandler
-    public void onQuit(PlayerQuitEvent event) {
-        UUID pID = event.getPlayer().getUniqueId();
+    void removeTextDisplayEntity(Player player, boolean keepText){
+        UUID pID = player.getUniqueId();
+
 
         TextDisplay textDisplay = textDisplays.get(pID);
-        if (textDisplay != null) {
-            tempTexts.put(pID, textDisplay.text());
-            getLogger().info("remove text");
+        if(textDisplay != null){
+            if(keepText) {
+                //表示していたテキストを保存しておく
+                keepDisplayTexts.put(pID, textDisplay.text());
+            }
             textDisplay.remove();
             textDisplays.remove(pID);
         }
 
+        if(!keepText){
+            keepDisplayTexts.remove(pID);
+        }
 
-        getLogger().info("onQuit end");
 
     }
 
-    @EventHandler
-    public void onChangeWorld(PlayerChangedWorldEvent event){
-        Player player = event.getPlayer();
+    void hideDisplayTemporarily(Player player){
+        removeTextDisplayEntity(player,true);
+    }
+    void removeDisplayPermanently(Player player){
+        removeTextDisplayEntity(player,false);
+    }
+
+    boolean setText(Player player,String text){
         UUID pID = player.getUniqueId();
         TextDisplay textDisplay = textDisplays.get(pID);
-        if (textDisplay != null) {
-            textDisplay.teleport(player);
-            player.addPassenger(textDisplay);
+        if(textDisplay != null){
+            textDisplay.text(Component.text(text));
+            keepDisplayTexts.put(pID,Component.text(text));
+            return true;
+        }
+        return false;
+    }
+
+    //NGワード変更
+    void changeNGWord(Player player,String text){
+
+        if(setText(player,text)){
+            //minecraft タイトル表示でtext設定されたことをお知らせ
+            getServer().showTitle(
+                    Title.title(
+                            Component.text("NGワード変更", NamedTextColor.GOLD),
+                            Component.text(player.getName(),NamedTextColor.AQUA)
+                                    .append(Component.text(" のNGワードが変更されました",NamedTextColor.GREEN)),
+                            10,100,10
+                    )
+            );
+            getServer().playSound(Sound.sound(
+                    Key.key("minecraft:entity.elder_guardian.curse"),
+                    Sound.Source.MASTER,
+                    1f,1f
+            ));
+        }
+
+
+    }
+
+    //プレイヤーアウト！
+    void outPlayer(Player player){
+        UUID pID = player.getUniqueId();
+        TextDisplay textDisplay = textDisplays.get(pID);
+        if(textDisplay != null){
+            Component textComponent = Component.text(
+                    PlainTextComponentSerializer.plainText().serialize(textDisplay.text()),
+                    NamedTextColor.RED);
+            textDisplay.text(textComponent);
+            keepDisplayTexts.put(pID,textComponent);
+
+            getServer().showTitle(
+                    Title.title(
+                            Component.text(player.getName() + " アウト", NamedTextColor.RED),
+                            Component.text(""),
+                            10,100,10
+                    )
+            );
+            getServer().playSound(Sound.sound(
+                    Key.key("minecraft:entity.wither.spawn"),
+                    Sound.Source.MASTER,
+                    1f,0.7f
+            ));
+            getServer().playSound(Sound.sound(
+                    Key.key("koneshimaex:se.use_totem"),
+                    Sound.Source.MASTER,
+                    0.4f,0.5f
+            ));
+
         }
 
     }
 
+    /**
+     * NGDisplay を 直します
+     * @param player プレイヤー
+     */
+    void fixNGDisplay(Player player){
+        UUID pID = player.getUniqueId();
+        if(textDisplays.containsKey(pID) || keepDisplayTexts.containsKey(pID)){
+            hideDisplayTemporarily(player);
+            summonNGDisplay(player);
+        }
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event){
+        fixNGDisplay(event.getPlayer());
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        hideDisplayTemporarily(event.getPlayer());
+    }
+
+    @EventHandler
+    public void onChangeWorld(PlayerChangedWorldEvent event){
+        fixNGDisplay(event.getPlayer());
+    }
+
+    @EventHandler
+    public void onTeleport(PlayerTeleportEvent event){
+        fixNGDisplay(event.getPlayer());
+    }
+
+    @EventHandler
+    public void onPlayerDeath(PlayerDeathEvent event){
+        removeDisplayPermanently(event.getPlayer());
+    }
 
 }

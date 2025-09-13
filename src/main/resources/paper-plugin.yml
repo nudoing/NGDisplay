@@ -1,8 +1,12 @@
 name: NGDisplay
 version: '1.0'
 main: com.gmail.nudoing.nGDisplay.NGDisplay
+bootstrapper: com.gmail.nudoing.nGDisplay.NGDisplayBootstrap
 api-version: '1.21'
 authors: [ nudon ]
 description: test
-#depend: [ ProtocolLib ]
 
+permissions:
+  ngdisplay.command:
+    description: "Allows usage of the /ngdisplay command."
+    default: op
